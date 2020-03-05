@@ -1,7 +1,6 @@
 // Device ID: xinput list
 // Video Stream: ls -ltrh /dev/video*
 
-
 #ifdef _WIN32 
 	#include <direct.h>
 	#define GetCurrentDir _getcwd
