@@ -21,7 +21,7 @@ endif()
 
 message( "build mode is: ${CMAKE_BUILD_TYPE}" )
 
-project( Measure_3D )
+project( Stereo_3D_Measure )
 
 find_package( OpenCV REQUIRED )
 find_package( Threads REQUIRED )
