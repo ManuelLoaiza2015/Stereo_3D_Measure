@@ -3,8 +3,8 @@
 #include <opencv2/aruco.hpp>
 #include <opencv2/aruco/charuco.hpp>
 
-#define LARGEUR_ECRAN 1200
-#define HAUTEUR_ECRAN 900
+#define WIDTH_SCREEN 1200
+#define HEIGHT_SCREEN 900
 
 #ifdef USE_VTK
 #include <opencv2/viz.hpp>
@@ -203,8 +203,8 @@ int main (int argc,char **argv)
     }
     if (!configActive)
         SauverConfiguration("config.yml", mire, pc, sys3d,pStereo);
-    if (tailleGlobale.width>LARGEUR_ECRAN || tailleGlobale.height>HAUTEUR_ECRAN)
-        zoomAffichage = min(LARGEUR_ECRAN/float(tailleGlobale.width) ,  HAUTEUR_ECRAN/float(tailleGlobale.height) );
+    if (tailleGlobale.width>WIDTH_SCREEN || tailleGlobale.height>HEIGHT_SCREEN)
+        zoomAffichage = min(WIDTH_SCREEN/float(tailleGlobale.width) ,  HEIGHT_SCREEN/float(tailleGlobale.height) );
 
     Mat frame(tailleGlobale,CV_8UC3,Scalar(0,0,0));
     Point centre(20,20);
