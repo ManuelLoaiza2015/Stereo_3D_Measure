@@ -24,21 +24,22 @@ using namespace cv;
 using namespace std;
 
 #define NBCAMERA 2
+
 struct ParamAlgoStereo{
     Ptr<StereoSGBM> sgbm;
     Ptr<StereoBM> bm;
     
     int typeAlgoSGBM;
-    int typePreFiltre= StereoBM::PREFILTER_XSOBEL;
-    int tailleBloc=3;
-    int nbDisparite=8;
-    int etenduSpeckle=1;
-    int tailleSpeckle=10;
-    int unicite=3;
+    int typePreFilter= StereoBM::PREFILTER_XSOBEL;
+    int blockSize=3;
+    int nbDisparity=8;
+    int extendedSpeckle=1;
+    int sizeSpeckle=10;
+    int uniqueness=3;
     int preFilterCap=31;
 };
 
-struct ParamMire {
+struct ParamTarget {
     int nbL = 9, nbC = 6;
     int nbLAruco = 5, nbCAruco = 8;
     float dimCarre = 0.0275;
@@ -59,18 +60,18 @@ struct ParamCalibration3D {
     vector<Mat> d;
     Rect valid1,valid2;
     double rms;
-    String ficDonnees;
-    vector<vector<Point2f>>  pointsCameraGauche;
-    vector<vector<Point2f>>  pointsCameraDroite;
+    String dataFile;
+    vector<vector<Point2f>>  pointsCameraLeft;
+    vector<vector<Point2f>>  pointsCameraRight;
     vector<vector<Point3f> > pointsObjets;
 };
 
-struct SuiviDistance{
+struct TrackingDistance{
     ParamCalibration3D *pStereo;
-    Mat disparite;
+    Mat disparity;
     Mat m;
     vector<Point3d> p;
-    float zoomAffichage;
+    float zoomDisplay;
 };
 
 struct ParamCalibration {
@@ -81,13 +82,13 @@ struct ParamCalibration {
     Mat cameraMatrix, distCoeffs;
     Mat mapx;
     Mat mapy;
-    int nbImageGrille=0;
-    vector<Point3f>  pointsGrille;
+    int nbGridImage=0;
+    vector<Point3f>  gridPoints;
     vector<vector<Point2f>>  pointsCamera;
     vector<vector<Point3f> > pointsObjets;
-    Size tailleImage;
+    Size sizeImage;
     double rms;
-    String ficDonnees;
+    String dataFile;
 };
 
 struct ParamCamera {
@@ -97,10 +98,10 @@ struct ParamCamera {
     int tpsCapture;
     int captureImage;
     int cmd;
-    double tempsDelai;
+    double timeDelay;
     vector<Mat> imAcq;
     vector<int64> debAcq,finAcq;
-    Mat derniereImage;
+    Mat lastImage;
 };
 
 
@@ -110,84 +111,88 @@ vector<vector<int64>> tps(mtxTimeStamp.size());
 int stopThread=0;
 
 static void videoacquire(ParamCamera *pc);
-static vector<Mat> LireImages(vector<ParamCamera> *pc, vector<VideoCapture> *v,vector<Mat> &x);
-static vector<Mat> LireImagesSynchro(vector<ParamCamera> *pc, vector<VideoCapture> *v);
-static vector<VideoCapture> RechercheCamera();
-static void AjouteGlissiere(String nomGlissiere, String nomFenetre, int minGlissiere, int maxGlissiere, int valeurDefaut, int *valGlissiere, void(*f)(int, void *), void *r = NULL);
-static void MAJParamStereo(int x, void *r);
-static void GestionCmdCamera(ParamCamera *pc);
-static double ErreurDroiteEpipolaire(ParamCalibration3D sys3d);
-static Mat zoom(Mat , float,SuiviDistance * = NULL);
-static bool ChargerConfiguration(String nomFichierConfiguration, ParamMire &mire, vector<ParamCalibration> &pc, ParamCalibration3D &sys3d, ParamAlgoStereo &);
-static void SauverConfiguration(String nomFichierConfiguration, ParamMire mire, vector<ParamCalibration> pc, ParamCalibration3D &sys3d,ParamAlgoStereo &);
-static void SauverDonneesCalibration(ParamCalibration *pc1, ParamCalibration *pc2, ParamCalibration3D *sys3d);
-static void ChargerDonneesCalibration(String nomFichier, ParamCalibration *pc, ParamCalibration3D *sys3d);
-static bool AnalyseCharuco(Mat x,  ParamCalibration &pc, Mat frame, ParamMire &mire);
-static bool AnalyseGrille(Mat x,  ParamCalibration *pc, ParamCalibration3D *sys3d, int index, Mat frame, ParamMire &mire);
+static vector<Mat> ReadImages(vector<ParamCamera> *pc, vector<VideoCapture> *v,vector<Mat> &x);
+static vector<Mat> ReadImagesSynchro(vector<ParamCamera> *pc, vector<VideoCapture> *v);
+static vector<VideoCapture> SearchCamera();
+static void AddSlide(String nameSlide, String nameWindow, int minSlide, int maxSlide, int defaultValue, int *valSlide, void(*f)(int, void *), void *r = NULL);
+static void UpdateParamStereo(int x, void *r);
+static void ManagementCmdCamera(ParamCamera *pc);
+static double EpipolarRightError(ParamCalibration3D sys3d);
+static Mat zoom(Mat , float, TrackingDistance * = NULL);
+static bool LoadConfiguration(String fileNameConfiguration, ParamTarget &target, vector<ParamCalibration> &pc, ParamCalibration3D &sys3d, ParamAlgoStereo &);
+static void SaveConfiguration(String fileNameConfiguration, ParamTarget target, vector<ParamCalibration> pc, ParamCalibration3D &sys3d,ParamAlgoStereo &);
+static void SaveCalibrationData(ParamCalibration *pc1, ParamCalibration *pc2, ParamCalibration3D *sys3d);
+static void LoadCalibrationData(String nomFichier, ParamCalibration *pc, ParamCalibration3D *sys3d);
+static bool AnalysisCharuco(Mat x,  ParamCalibration &pc, Mat frame, ParamTarget &target);
+static bool AnalysisGrid(Mat x,  ParamCalibration *pc, ParamCalibration3D *sys3d, int index, Mat frame, ParamTarget &target);
+
 #ifdef USE_VTK
-static void VizMonde(Mat img,  Mat xyz);
-static void VizDisparite(Mat img, Mat disp);
+static void VizWorld(Mat img,  Mat xyz);
+static void Vizdisparity(Mat img, Mat disp);
 #endif
+
 static void MesureDistance(int event, int x, int y, int flags, void *userdata);
 
 
-#define MODE_AFFICHAGE 0x100
-#define MODE_CALIBRE 0x200
-#define MODE_MAPSTEREO 0x400
-#define MODE_EPIPOLAIRE 0x800
-#define MODE_REGLAGECAMERA 0x1000
+#define DISPLAY_MODE 0x100
+#define CALIBRATION_MODE 0x200
+#define MAPSTEREO_MODE 0x400
+#define EPIPOLAR_MODE 0x800
+#define CAMERASETUP_MODE  0x1000
 
 
 int main (int argc,char **argv)
 {
 
-    ParamMire mire;
+    ParamTarget target;
     int typeDistorsion =0;
-    mire.dictionary =aruco::getPredefinedDictionary(aruco::PREDEFINED_DICTIONARY_NAME(mire.dict));
-    mire.gridboard = aruco::CharucoBoard::create(mire.nbCAruco, mire.nbLAruco, mire.dimAruco, mire.sepAruco, mire.dictionary);
-    mire.board = mire.gridboard.staticCast<aruco::Board>();
-    mire.detectorParams = aruco::DetectorParameters::create();
-    mire.detectorParams->cornerRefinementMethod = aruco::CORNER_REFINE_SUBPIX;
-    mire.detectorParams->cornerRefinementMinAccuracy = 0.01;
-    float zoomAffichage=1;
+    target.dictionary =aruco::getPredefinedDictionary(aruco::PREDEFINED_DICTIONARY_NAME(target.dict));
+    target.gridboard = aruco::CharucoBoard::create(target.nbCAruco, target.nbLAruco, target.dimAruco, target.sepAruco, target.dictionary);
+    target.board = target.gridboard.staticCast<aruco::Board>();
+    target.detectorParams = aruco::DetectorParameters::create();
+    target.detectorParams->cornerRefinementMethod = aruco::CORNER_REFINE_SUBPIX;
+    target.detectorParams->cornerRefinementMinAccuracy = 0.01;
+    float zoomDisplay=1;
 
     vector<thread> th;
-    vector<double> tpsMoyen;
+    vector<double> tpsAverageTime;
     ParamCalibration3D sys3d;
-    SuiviDistance sDistance;
+    TrackingDistance sDistance;
     ParamAlgoStereo pStereo;
     vector<ParamCamera> pCamera(2);
     vector<ParamCalibration> pc(pCamera.size());
     vector<VideoCapture> v(pCamera.size());
 
-    Size tailleGlobale(0,0);
-    vector<Size> tailleWebcam(pCamera.size());
-    bool configActive = ChargerConfiguration("config.yml", mire, pc, sys3d,pStereo);
+    Size globalSize(0,0);
+    vector<Size> webcamSize(pCamera.size());
+    bool configActive = LoadConfiguration("config.yml", target, pc, sys3d,pStereo);
     int64 tpsGlobal = getTickCount();
     int nbCamera=0;
 
     for (int i = 0; i<pc.size();i++)
     {
-        VideoCapture vid(pc[i].indexUSB+CAP_DSHOW);
+        //std::cout<<"\nCamera Index -> pc[i].indexUSB: "<< pc[i].indexUSB << " + CAP_DSHOW: "<< CAP_DSHOW <<" = " <<pc[i].indexUSB+CAP_DSHOW;
+        //VideoCapture vid(pc[i].indexUSB+CAP_DSHOW);
+        VideoCapture vid(pc[i].indexUSB);
         if (vid.isOpened())
         {
             nbCamera++;
             v[i]=vid;
-            vid.set(CAP_PROP_FRAME_WIDTH, pc[i].tailleImage.width);
-            vid.set(CAP_PROP_FRAME_HEIGHT, pc[i].tailleImage.height);
-            tailleWebcam[i]=Size(v[i].get(CAP_PROP_FRAME_WIDTH), v[i].get(CAP_PROP_FRAME_HEIGHT));
-            pc[i].tailleImage = tailleWebcam[i];
+            vid.set(CAP_PROP_FRAME_WIDTH, pc[i].sizeImage.width);
+            vid.set(CAP_PROP_FRAME_HEIGHT, pc[i].sizeImage.height);
+            webcamSize[i]=Size(v[i].get(CAP_PROP_FRAME_WIDTH), v[i].get(CAP_PROP_FRAME_HEIGHT));
+            pc[i].sizeImage = webcamSize[i];
             if (i==0)
-                tailleGlobale= tailleWebcam[i];
+                globalSize= webcamSize[i];
             else if (i%2==1)
-                tailleGlobale.width += tailleWebcam[i].width;
+                globalSize.width += webcamSize[i].width;
             else
-                tailleGlobale.height += tailleWebcam[i].height;
+                globalSize.height += webcamSize[i].height;
             pCamera[i].v = &v[i];
             pCamera[i].pc = &pc[i];
             pCamera[i].cmd = 0;
             pCamera[i].tpsGlobal= tpsGlobal;
-            pCamera[i].tempsDelai = 0.1;
+            pCamera[i].timeDelay = 0.1;
             
             thread t(videoacquire, &pCamera[i]);
             t.detach();
@@ -195,19 +200,22 @@ int main (int argc,char **argv)
         else
             th.push_back(thread() );
     }
+
     if (nbCamera != 2)
     {
-        cout<< nbCamera << " trouvée(s). ";
-        cout<<"Il faut uniquement 2 caméras!\n";
+        cout<< nbCamera << " Found. ";
+        cout<<"Only 2 cameras are needed!\n";
         return 0;
     }
+    
     if (!configActive)
-        SauverConfiguration("config.yml", mire, pc, sys3d,pStereo);
-    if (tailleGlobale.width>WIDTH_SCREEN || tailleGlobale.height>HEIGHT_SCREEN)
-        zoomAffichage = min(WIDTH_SCREEN/float(tailleGlobale.width) ,  HEIGHT_SCREEN/float(tailleGlobale.height) );
+        SaveConfiguration("config.yml", target, pc, sys3d,pStereo);
 
-    Mat frame(tailleGlobale,CV_8UC3,Scalar(0,0,0));
-    Point centre(20,20);
+    if (globalSize.width > WIDTH_SCREEN || globalSize.height > HEIGHT_SCREEN)
+        zoomDisplay = min(WIDTH_SCREEN/float(globalSize.width) ,  HEIGHT_SCREEN/float(globalSize.height) );
+
+    Mat frame(globalSize,CV_8UC3,Scalar(0,0,0));
+    Point center(20,20);
     vector<int64> tCapture;
     vector<Mat> x;
     int modeAffichage=0;
@@ -216,79 +224,79 @@ int main (int argc,char **argv)
     Mat map11, map12, map21, map22;
 
     if (!sys3d.R1.empty())
-        initUndistortRectifyMap(sys3d.m[0], sys3d.d[0], sys3d.R1, sys3d.P1, tailleWebcam[0], CV_16SC2, map11, map12);
+        initUndistortRectifyMap(sys3d.m[0], sys3d.d[0], sys3d.R1, sys3d.P1, webcamSize[0], CV_16SC2, map11, map12);
     if (!sys3d.R2.empty())
-        initUndistortRectifyMap(sys3d.m[1], sys3d.d[1], sys3d.R2, sys3d.P2, tailleWebcam[1], CV_16SC2, map21, map22);
+        initUndistortRectifyMap(sys3d.m[1], sys3d.d[1], sys3d.R2, sys3d.P2, webcamSize[1], CV_16SC2, map21, map22);
     sDistance.pStereo =&sys3d;
-    sDistance.zoomAffichage = zoomAffichage;
-    imshow("Cameras",zoom(frame, zoomAffichage));
+    sDistance.zoomDisplay = zoomDisplay;
+    imshow("Cameras",zoom(frame, zoomDisplay));
     namedWindow("Control",WINDOW_NORMAL);
     if (!map11.empty() && !map21.empty())
     {
-        pStereo.bm = StereoBM::create(16*pStereo.nbDisparite, 2 * pStereo.tailleBloc + 1);
-        pStereo.sgbm = StereoSGBM::create(0, 16*pStereo.nbDisparite, 2 * pStereo.tailleBloc + 1);
-        pStereo.bm->setPreFilterType(pStereo.typePreFiltre);
-        pStereo.bm->setUniquenessRatio(pStereo.unicite);
-        pStereo.sgbm->setUniquenessRatio(pStereo.unicite);
-        pStereo.bm->setSpeckleWindowSize(pStereo.tailleSpeckle);
-        pStereo.sgbm->setSpeckleWindowSize(pStereo.tailleSpeckle);
-        pStereo.bm->setSpeckleRange(pStereo.etenduSpeckle);
-        pStereo.sgbm->setSpeckleRange(pStereo.etenduSpeckle);
-        AjouteGlissiere("Bloc", "Control", 2, 100, pStereo.tailleBloc, &pStereo.tailleBloc, MAJParamStereo, &pStereo);
-        AjouteGlissiere("nbDisparite", "Control", 1, 100, pStereo.nbDisparite, &pStereo.nbDisparite, MAJParamStereo, &pStereo);
-        AjouteGlissiere("Unicite", "Control", 3, 100, pStereo.unicite, &pStereo.unicite, MAJParamStereo, &pStereo);
-        AjouteGlissiere("EtenduSpeckle", "Control", 1, 10, pStereo.etenduSpeckle, &pStereo.etenduSpeckle, MAJParamStereo, &pStereo);
-        AjouteGlissiere("TailleSpeckle", "Control", 3, 100, pStereo.tailleSpeckle, &pStereo.tailleSpeckle, MAJParamStereo, &pStereo);
+        pStereo.bm = StereoBM::create(16*pStereo.nbDisparity, 2 * pStereo.blockSize + 1);
+        pStereo.sgbm = StereoSGBM::create(0, 16*pStereo.nbDisparity, 2 * pStereo.blockSize + 1);
+        pStereo.bm->setPreFilterType(pStereo.typePreFilter);
+        pStereo.bm->setUniquenessRatio(pStereo.uniqueness);
+        pStereo.sgbm->setUniquenessRatio(pStereo.uniqueness);
+        pStereo.bm->setSpeckleWindowSize(pStereo.sizeSpeckle);
+        pStereo.sgbm->setSpeckleWindowSize(pStereo.sizeSpeckle);
+        pStereo.bm->setSpeckleRange(pStereo.extendedSpeckle);
+        pStereo.sgbm->setSpeckleRange(pStereo.extendedSpeckle);
+        AddSlide("Bloc", "Control", 2, 100, pStereo.blockSize, &pStereo.blockSize, UpdateParamStereo, &pStereo);
+        AddSlide("nbDisparity", "Control", 1, 100, pStereo.nbDisparity, &pStereo.nbDisparity, UpdateParamStereo, &pStereo);
+        AddSlide("uniqueness", "Control", 3, 100, pStereo.uniqueness, &pStereo.uniqueness, UpdateParamStereo, &pStereo);
+        AddSlide("extendedSpeckle", "Control", 1, 10, pStereo.extendedSpeckle, &pStereo.extendedSpeckle, UpdateParamStereo, &pStereo);
+        AddSlide("sizeSpeckle", "Control", 3, 100, pStereo.sizeSpeckle, &pStereo.sizeSpeckle, UpdateParamStereo, &pStereo);
 
         int alg= StereoSGBM::MODE_SGBM;
         pStereo.sgbm->setMode(alg);
     }
 
-    for (int i = 0; i < mire.nbL; i++)
-        for (int j = 0; j < mire.nbC; j++)
+    for (int i = 0; i < target.nbL; i++)
+        for (int j = 0; j < target.nbC; j++)
             for (int k=0;k<pc.size();k++)
-                pc[k].pointsGrille.push_back(
-                    Point3f(float(j*mire.dimCarre), float(i*mire.dimCarre), 0));
+                pc[k].gridPoints.push_back(
+                    Point3f(float(j*target.dimCarre), float(i*target.dimCarre), 0));
     int code =0;
     int flags= 0;
     int indexCamera=0,indImage=0;
 
 
     Mat art0, art1;
-    Mat disparite;
+    Mat disparity;
     
     vector<vector<Point2d>> p2D;
     vector<Point2f> segment;
     for (int i = 0; i < 10;i++)
-        segment.push_back(Point2f(tailleWebcam[0].width/2, tailleWebcam[0].height*i / 10.0));
+        segment.push_back(Point2f(webcamSize[0].width/2, webcamSize[0].height*i / 10.0));
     Mat equEpipolar;
     namedWindow("Webcam 0");
-    namedWindow("disparite");
+    namedWindow("disparity");
     setMouseCallback("Webcam 0", MesureDistance, &sDistance);
-    setMouseCallback("disparite", MesureDistance, &sDistance);
+    setMouseCallback("disparity", MesureDistance, &sDistance);
 
     int cameraSelect=0;
     do 
     {
         code = waitKey(1);
-        if (modeAffichage&MODE_REGLAGECAMERA)
+        if (modeAffichage&CAMERASETUP_MODE )
         {
             switch (code) {
             case '0':
                 mtxTimeStamp[0].lock();
-                pCamera[0].cmd = pCamera[0].cmd | (MODE_REGLAGECAMERA);
+                pCamera[0].cmd = pCamera[0].cmd | (CAMERASETUP_MODE );
                 mtxTimeStamp[0].unlock();
                 mtxTimeStamp[1].lock();
-                pCamera[1].cmd = pCamera[1].cmd & (~MODE_REGLAGECAMERA);
+                pCamera[1].cmd = pCamera[1].cmd & (~CAMERASETUP_MODE );
                 mtxTimeStamp[1].unlock();
                 cameraSelect=0;
                 break;
             case '1':
                 mtxTimeStamp[0].lock();
-                pCamera[0].cmd = pCamera[0].cmd & (~MODE_REGLAGECAMERA);
+                pCamera[0].cmd = pCamera[0].cmd & (~CAMERASETUP_MODE );
                 mtxTimeStamp[0].unlock();
                 mtxTimeStamp[1].lock();
-                pCamera[1].cmd = pCamera[1].cmd | (MODE_REGLAGECAMERA);
+                pCamera[1].cmd = pCamera[1].cmd | (CAMERASETUP_MODE );
                 mtxTimeStamp[1].unlock();
                 cameraSelect=1;
                 break;
@@ -306,9 +314,9 @@ int main (int argc,char **argv)
                 mtxTimeStamp[cameraSelect].unlock();
                 break;
             case 'R':
-                modeAffichage = modeAffichage& (~MODE_REGLAGECAMERA);
+                modeAffichage = modeAffichage& (~CAMERASETUP_MODE );
                 mtxTimeStamp[cameraSelect].lock();
-                pCamera[cameraSelect].cmd = pCamera[cameraSelect].cmd & (~MODE_REGLAGECAMERA);
+                pCamera[cameraSelect].cmd = pCamera[cameraSelect].cmd & (~CAMERASETUP_MODE );
                 mtxTimeStamp[cameraSelect].unlock();
                 break;
             }
@@ -317,34 +325,34 @@ int main (int argc,char **argv)
         {
             switch (code) {
             case 'R':
-                modeAffichage = modeAffichage| (MODE_REGLAGECAMERA);                    
+                modeAffichage = modeAffichage| (CAMERASETUP_MODE );                    
                 mtxTimeStamp[cameraSelect].lock();
-                pCamera[cameraSelect].cmd = pCamera[cameraSelect].cmd | MODE_REGLAGECAMERA;
+                pCamera[cameraSelect].cmd = pCamera[cameraSelect].cmd | CAMERASETUP_MODE ;
                 mtxTimeStamp[cameraSelect].unlock();
                 break;
             case 'a':
                 for (int i = 0; i < v.size(); i++)
                 {
                     mtxTimeStamp[i].lock();
-                    if (pCamera[i].cmd & MODE_AFFICHAGE)
-                        pCamera[i].cmd = pCamera[i].cmd & ~MODE_AFFICHAGE;
+                    if (pCamera[i].cmd & DISPLAY_MODE)
+                        pCamera[i].cmd = pCamera[i].cmd & ~DISPLAY_MODE;
                     else
-                        pCamera[i].cmd = pCamera[i].cmd | MODE_AFFICHAGE;
+                        pCamera[i].cmd = pCamera[i].cmd | DISPLAY_MODE;
                     modeAffichage = pCamera[i].cmd;
                     mtxTimeStamp[i].unlock();
                 }
                 break;
             case 'b':
-                frame = Mat::zeros(tailleGlobale, CV_8UC3);
+                frame = Mat::zeros(globalSize, CV_8UC3);
                 for (int i = 0; i < pc.size(); i++)
                 {
                     pc[i].pointsObjets.clear();
-                    pc[i].ficDonnees="";
+                    pc[i].dataFile="";
                     pc[i].pointsCamera.clear();
                 }
-                sys3d.pointsCameraDroite.clear();
-                sys3d.pointsCameraGauche.clear();
-                sys3d.ficDonnees="";
+                sys3d.pointsCameraRight.clear();
+                sys3d.pointsCameraLeft.clear();
+                sys3d.dataFile="";
                 sys3d.pointsObjets.clear();
                 break;
             case 'c':
@@ -353,35 +361,35 @@ int main (int argc,char **argv)
                     cout << "Aucune grille pour la calibration\n";
                     break;
                 }
-                if (pc[indexCamera].ficDonnees.length() == 0)
-                    SauverDonneesCalibration(&pc[indexCamera], NULL, NULL);
+                if (pc[indexCamera].dataFile.length() == 0)
+                    SaveCalibrationData(&pc[indexCamera], NULL, NULL);
                 pc[indexCamera].cameraMatrix = Mat();
                 pc[indexCamera].distCoeffs = Mat();
                 for (int i = 0; i<pc[indexCamera].typeCalib2D.size(); i++)
-                    pc[indexCamera].rms = calibrateCamera(pc[indexCamera].pointsObjets, pc[indexCamera].pointsCamera, tailleWebcam[indexCamera], pc[indexCamera].cameraMatrix,
+                    pc[indexCamera].rms = calibrateCamera(pc[indexCamera].pointsObjets, pc[indexCamera].pointsCamera, webcamSize[indexCamera], pc[indexCamera].cameraMatrix,
                         pc[indexCamera].distCoeffs, pc[indexCamera].rvecs, pc[indexCamera].tvecs, pc[indexCamera].typeCalib2D[i], TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 5000000, 1e-8));
                 cout << "RMS = " << pc[indexCamera].rms << "\n";
                 cout << pc[indexCamera].cameraMatrix << "\n";
                 cout << pc[indexCamera].distCoeffs << "\n";
 
-                SauverConfiguration("config.yml", mire, pc, sys3d,pStereo);
+                SaveConfiguration("config.yml", target, pc, sys3d,pStereo);
                 break;
             case 'D':
                 if (indexCamera != 1)
                     pc[indexCamera].pointsCamera.clear();
                 indexCamera = 1;
-                x = LireImages(&pCamera, &v, x);
+                x = ReadImages(&pCamera, &v, x);
                 if (x.size() == 2 && !x[0].empty() && !x[1].empty())
                 {
-                    Rect dst(Point(tailleWebcam[1].width, 0), tailleWebcam[1]);
-                    Mat y(tailleWebcam[1], CV_8UC3, Scalar(0, 0, 0));
+                    Rect dst(Point(webcamSize[1].width, 0), webcamSize[1]);
+                    Mat y(webcamSize[1], CV_8UC3, Scalar(0, 0, 0));
 
-                    if (AnalyseCharuco(x[indexCamera], pc[indexCamera], y, mire))
+                    if (AnalysisCharuco(x[indexCamera], pc[indexCamera], y, target))
                     {
                         frame(dst) = y + frame(dst);
-                        imshow("Cameras", zoom(frame, zoomAffichage,NULL));
-                        if (pc[indexCamera].ficDonnees.length() != 0)
-                            pc[indexCamera].ficDonnees = "";
+                        imshow("Cameras", zoom(frame, zoomDisplay,NULL));
+                        if (pc[indexCamera].dataFile.length() != 0)
+                            pc[indexCamera].dataFile = "";
                     }
                 }
                 break;
@@ -391,65 +399,65 @@ int main (int argc,char **argv)
                     pc[indexCamera].pointsCamera.clear();
                 }
                 indexCamera = 1;
-                x = LireImages(&pCamera, &v, x);
+                x = ReadImages(&pCamera, &v, x);
                 if (x.size() == 2 && !x[0].empty() && !x[1].empty())
                 {
-                    Rect dst(Point(tailleWebcam[1].width, 0), tailleWebcam[1]);
-                    Mat y(tailleWebcam[1], CV_8UC3, Scalar(0, 0, 0));
-                    if (AnalyseGrille(x[indexCamera], &pc[indexCamera], NULL, 0, y, mire))
+                    Rect dst(Point(webcamSize[1].width, 0), webcamSize[1]);
+                    Mat y(webcamSize[1], CV_8UC3, Scalar(0, 0, 0));
+                    if (AnalysisGrid(x[indexCamera], &pc[indexCamera], NULL, 0, y, target))
                     {
                         frame(dst) = y + frame(dst);
-                        imshow("Cameras", zoom(frame, zoomAffichage));
-                        if (pc[indexCamera].ficDonnees.length() != 0)
-                            pc[indexCamera].ficDonnees = "";
+                        imshow("Cameras", zoom(frame, zoomDisplay));
+                        if (pc[indexCamera].dataFile.length() != 0)
+                            pc[indexCamera].dataFile = "";
                     }
                 }
                 break;
             case 'e':
                 imwrite("imgL.png", x[0]);
                 imwrite("imgR.png", x[1]);
-                if (!sDistance.disparite.empty())
+                if (!sDistance.disparity.empty())
                 {
-                    sDistance.disparite.convertTo(disparite, CV_32F, 1 / 16.);
-                    FileStorage fs("disparite.yml", FileStorage::WRITE);
+                    sDistance.disparity.convertTo(disparity, CV_32F, 1 / 16.);
+                    FileStorage fs("disparity.yml", FileStorage::WRITE);
                     if (fs.isOpened())
-                        fs << "Image" << disparite;
-                    FileStorage fs2("disparitebrut.yml", FileStorage::WRITE);
+                        fs << "Image" << disparity;
+                    FileStorage fs2("disparitybrut.yml", FileStorage::WRITE);
                     if (fs2.isOpened())
-                        fs2 << "Image" << sDistance.disparite;
+                        fs2 << "Image" << sDistance.disparity;
                 }
                 break;
             case 'G':
                 if (indexCamera != 0)
                     pc[indexCamera].pointsCamera.clear();
                 indexCamera = 0;
-                x = LireImages(&pCamera, &v, x);
+                x = ReadImages(&pCamera, &v, x);
                 if (x.size() == 2)
-                    if (AnalyseCharuco(x[indexCamera], pc[indexCamera],frame,mire))
+                    if (AnalysisCharuco(x[indexCamera], pc[indexCamera],frame,target))
                     {
-                        if (pc[indexCamera].ficDonnees.length() != 0)
-                            pc[indexCamera].ficDonnees = "";
-                        imshow("Cameras", zoom(frame, zoomAffichage));
+                        if (pc[indexCamera].dataFile.length() != 0)
+                            pc[indexCamera].dataFile = "";
+                        imshow("Cameras", zoom(frame, zoomDisplay));
                     }
                 break;
             case 'g':
                 if (indexCamera != 0)
                     pc[indexCamera].pointsCamera.clear();
                 indexCamera = 0;
-                x = LireImages(&pCamera, &v, x);
+                x = ReadImages(&pCamera, &v, x);
                 if (x.size() == 2 && !x[0].empty() && !x[1].empty())
-                    if (AnalyseGrille(x[indexCamera], &pc[indexCamera], NULL, 0, frame, mire))
+                    if (AnalysisGrid(x[indexCamera], &pc[indexCamera], NULL, 0, frame, target))
                     {
-                        if (pc[indexCamera].ficDonnees.length() != 0)
-                            pc[indexCamera].ficDonnees = "";
-                        imshow("Cameras", zoom(frame, zoomAffichage));
+                        if (pc[indexCamera].dataFile.length() != 0)
+                            pc[indexCamera].dataFile = "";
+                        imshow("Cameras", zoom(frame, zoomDisplay));
                     }
                 break;
             case 'l':
-                if (modeAffichage&MODE_EPIPOLAIRE)
-                    modeAffichage = modeAffichage & (~MODE_EPIPOLAIRE);
+                if (modeAffichage&EPIPOLAR_MODE)
+                    modeAffichage = modeAffichage & (~EPIPOLAR_MODE);
                 else
-                    modeAffichage = modeAffichage | (MODE_EPIPOLAIRE);
+                    modeAffichage = modeAffichage | (EPIPOLAR_MODE);
 
                 if (!sys3d.F.empty())
                 {
@@ -458,24 +466,24 @@ int main (int argc,char **argv)
                 }
                 break;
             case 'o':
-                if (!sDistance.disparite.empty())
+                if (!sDistance.disparity.empty())
                 {
                     Mat xyz;
-                    sDistance.disparite.convertTo(disparite, CV_32F, 1 / 16.);
-                    reprojectImageTo3D(disparite, xyz, sys3d.Q, true);
+                    sDistance.disparity.convertTo(disparity, CV_32F, 1 / 16.);
+                    reprojectImageTo3D(disparity, xyz, sys3d.Q, true);
 #ifdef USE_VTK
-                    VizMonde(x[0],  xyz);
+                    VizWorld(x[0],  xyz);
 #else
                     cout<<"VTK non installé";
 #endif
                 }
                 break;
             case 'O':
-                if (!sDistance.disparite.empty())
+                if (!sDistance.disparity.empty())
                 {
-                    sDistance.disparite.convertTo(disparite, CV_32F, 1 / 16.);
+                    sDistance.disparity.convertTo(disparity, CV_32F, 1 / 16.);
 #ifdef USE_VTK
-                    VizDisparite(x[0], disparite);
+                    Vizdisparity(x[0], disparity);
 #else
                     cout << "VTK non installé";
 #endif
@@ -484,27 +492,27 @@ int main (int argc,char **argv)
             case 's':
                 if (indexCamera != 3)
                 {
-                    sys3d.pointsCameraGauche.clear();
-                    sys3d.pointsCameraDroite.clear();
+                    sys3d.pointsCameraLeft.clear();
+                    sys3d.pointsCameraRight.clear();
                     sys3d.pointsObjets.clear();
-                    if (sys3d.ficDonnees != "")
-                        sys3d.ficDonnees = "";
+                    if (sys3d.dataFile != "")
+                        sys3d.dataFile = "";
                 }
                 indexCamera = 3;
-                x = LireImages(&pCamera, &v,x);
+                x = ReadImages(&pCamera, &v,x);
                 if (x.size() == 2)
                 {
                     vector<Point2f> echiquierg, echiquierd;
-                    bool grilleg = findChessboardCorners(x[0], Size(mire.nbC, mire.nbL), echiquierg, CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FAST_CHECK | CALIB_CB_NORMALIZE_IMAGE);
-                    bool grilled = findChessboardCorners(x[1], Size(mire.nbC, mire.nbL), echiquierd, CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FAST_CHECK | CALIB_CB_NORMALIZE_IMAGE);
+                    bool grilleg = findChessboardCorners(x[0], Size(target.nbC, target.nbL), echiquierg, CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FAST_CHECK | CALIB_CB_NORMALIZE_IMAGE);
+                    bool grilled = findChessboardCorners(x[1], Size(target.nbC, target.nbL), echiquierd, CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FAST_CHECK | CALIB_CB_NORMALIZE_IMAGE);
                     if (grilleg && grilled)
                     {
-                        Rect dst(Point(tailleWebcam[1].width, 0), tailleWebcam[1]);
-                        Mat y(tailleWebcam[1], CV_8UC3, Scalar(0, 0, 0));
-                        AnalyseGrille(x[0], &pc[0], &sys3d, 0, frame, mire);
-                        AnalyseGrille(x[1], &pc[0], &sys3d, 1, y, mire);
+                        Rect dst(Point(webcamSize[1].width, 0), webcamSize[1]);
+                        Mat y(webcamSize[1], CV_8UC3, Scalar(0, 0, 0));
+                        AnalysisGrid(x[0], &pc[0], &sys3d, 0, frame, target);
+                        AnalysisGrid(x[1], &pc[0], &sys3d, 1, y, target);
                         frame(dst) = y + frame(dst);
-                        imshow("Cameras", zoom(frame, zoomAffichage));
+                        imshow("Cameras", zoom(frame, zoomDisplay));
                     }
                 }
                 break;
@@ -513,15 +521,15 @@ int main (int argc,char **argv)
                 {
                     for (int i = 0; i < pc.size(); i++)
                     {
-                        sys3d.pointsCameraGauche.clear();
-                        sys3d.pointsCameraDroite.clear();
+                        sys3d.pointsCameraLeft.clear();
+                        sys3d.pointsCameraRight.clear();
                         sys3d.pointsObjets.clear();
-                        if (sys3d.ficDonnees != "")
-                            sys3d.ficDonnees = "";
+                        if (sys3d.dataFile != "")
+                            sys3d.dataFile = "";
                     }
                 }
                 indexCamera = 3;
-                x = LireImagesSynchro(&pCamera, &v);
+                x = ReadImagesSynchro(&pCamera, &v);
                 if (x.size() == 2)
                 {
                     vector<Point2f> echiquierg, echiquierd;
@@ -529,18 +537,18 @@ int main (int argc,char **argv)
                     vector< vector< Point2f > > refArucog, refus;
                     vector< int > idsd;
                     vector< vector< Point2f > > refArucod;
-                    aruco::detectMarkers(x[0], mire.dictionary, refArucog, idsg, mire.detectorParams, refus);
-                    aruco::refineDetectedMarkers(x[0], mire.board, refArucog, idsg, refus);
-                    aruco::detectMarkers(x[1], mire.dictionary, refArucod, idsd, mire.detectorParams, refus);
-                    aruco::refineDetectedMarkers(x[1], mire.board, refArucod, idsd, refus);
+                    aruco::detectMarkers(x[0], target.dictionary, refArucog, idsg, target.detectorParams, refus);
+                    aruco::refineDetectedMarkers(x[0], target.board, refArucog, idsg, refus);
+                    aruco::detectMarkers(x[1], target.dictionary, refArucod, idsd, target.detectorParams, refus);
+                    aruco::refineDetectedMarkers(x[1], target.board, refArucod, idsd, refus);
                     if (idsg.size() > 0 && idsd.size()>0)
                     {
                         aruco::drawDetectedMarkers(frame, refArucog, idsg);
-                        Rect dst(Point(tailleWebcam[1].width, 0), tailleWebcam[1]);
-                        Mat y(tailleWebcam[1], CV_8UC3, Scalar(0, 0, 0));
+                        Rect dst(Point(webcamSize[1].width, 0), webcamSize[1]);
+                        Mat y(webcamSize[1], CV_8UC3, Scalar(0, 0, 0));
                         aruco::drawDetectedMarkers(y, refArucod, idsd);
                         frame(dst) = y + frame(dst);
-                        imshow("Cameras", zoom(frame, zoomAffichage));
+                        imshow("Cameras", zoom(frame, zoomDisplay));
                         vector<Point3f> pReel;
                         for (int ir = 0; ir<refArucog.size(); ir++)
                         {
@@ -552,13 +560,13 @@ int main (int argc,char **argv)
                                 {
                                     echiquierg.push_back(refArucog[ir][jr]);
                                     echiquierd.push_back(refArucod[id][jr]);
-                                    pReel.push_back(mire.board.get()->objPoints[idsg[ir]][jr]);
+                                    pReel.push_back(target.board.get()->objPoints[idsg[ir]][jr]);
                                 }
                             }
                         }
                         sys3d.pointsObjets.push_back(pReel);
-                        sys3d.pointsCameraGauche.push_back(echiquierg);
-                        sys3d.pointsCameraDroite.push_back(echiquierd);
+                        sys3d.pointsCameraLeft.push_back(echiquierg);
+                        sys3d.pointsCameraRight.push_back(echiquierd);
                     }
                 }
                 break;
@@ -588,31 +596,31 @@ int main (int argc,char **argv)
                     break;
                 case 1:
                     if (!sys3d.R1.empty())
-                        initUndistortRectifyMap(sys3d.m[0], sys3d.d[0], Mat(), Mat(), tailleWebcam[0], CV_16SC2, map11, map12);
+                        initUndistortRectifyMap(sys3d.m[0], sys3d.d[0], Mat(), Mat(), webcamSize[0], CV_16SC2, map11, map12);
                     if (!sys3d.R2.empty())
-                        initUndistortRectifyMap(sys3d.m[1], sys3d.d[1], Mat(), Mat(), tailleWebcam[1], CV_16SC2, map21, map22);
+                        initUndistortRectifyMap(sys3d.m[1], sys3d.d[1], Mat(), Mat(), webcamSize[1], CV_16SC2, map21, map22);
                     break;
                 case 2:
                     if (!sys3d.R1.empty())
-                        initUndistortRectifyMap(sys3d.m[0], Mat(), sys3d.R1, sys3d.P1, tailleWebcam[0], CV_16SC2, map11, map12);
+                        initUndistortRectifyMap(sys3d.m[0], Mat(), sys3d.R1, sys3d.P1, webcamSize[0], CV_16SC2, map11, map12);
                     if (!sys3d.R2.empty())
-                        initUndistortRectifyMap(sys3d.m[1], Mat(), sys3d.R2, sys3d.P2, tailleWebcam[1], CV_16SC2, map21, map22);
+                        initUndistortRectifyMap(sys3d.m[1], Mat(), sys3d.R2, sys3d.P2, webcamSize[1], CV_16SC2, map21, map22);
                     break;
                 case 3:
                     if (!sys3d.R1.empty())
-                        initUndistortRectifyMap(sys3d.m[0], sys3d.d[0], sys3d.R1, sys3d.P1, tailleWebcam[0], CV_16SC2, map11, map12);
+                        initUndistortRectifyMap(sys3d.m[0], sys3d.d[0], sys3d.R1, sys3d.P1, webcamSize[0], CV_16SC2, map11, map12);
                     if (!sys3d.R2.empty())
-                        initUndistortRectifyMap(sys3d.m[1], sys3d.d[1], sys3d.R2, sys3d.P2, tailleWebcam[1], CV_16SC2, map21, map22);
+                        initUndistortRectifyMap(sys3d.m[1], sys3d.d[1], sys3d.R2, sys3d.P2, webcamSize[1], CV_16SC2, map21, map22);
                     break;
                 }
                 break;
             case '3':
-                if (sys3d.pointsCameraGauche.size() != sys3d.pointsCameraDroite.size() || sys3d.pointsCameraGauche.size() == 0)
+                if (sys3d.pointsCameraLeft.size() != sys3d.pointsCameraRight.size() || sys3d.pointsCameraLeft.size() == 0)
                 {
                     cout << "Pas de grille coherente pour le calibrage 3D\n";
                     break;
                 }
-                SauverDonneesCalibration(&pc[0], &pc[1], &sys3d);
+                SaveCalibrationData(&pc[0], &pc[1], &sys3d);
 
                 sys3d.m[0] = pc[0].cameraMatrix.clone();
                 sys3d.m[1] = pc[1].cameraMatrix.clone();
@@ -620,22 +628,22 @@ int main (int argc,char **argv)
                 sys3d.d[1] = pc[1].distCoeffs.clone();
                 for (int i = 0; i < sys3d.typeCalib3D.size(); i++)
                 {
-                    sys3d.rms = stereoCalibrate(sys3d.pointsObjets, sys3d.pointsCameraGauche, sys3d.pointsCameraDroite,
+                    sys3d.rms = stereoCalibrate(sys3d.pointsObjets, sys3d.pointsCameraLeft, sys3d.pointsCameraRight,
                         sys3d.m[0], sys3d.d[0], sys3d.m[1], sys3d.d[1],
-                        tailleWebcam[0], sys3d.R, sys3d.T, sys3d.E, sys3d.F,
+                        webcamSize[0], sys3d.R, sys3d.T, sys3d.E, sys3d.F,
                         sys3d.typeCalib3D[i],
                         TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 5000000, 1e-8));
                 }
                 cout << "Erreur quadratique =" << sys3d.rms << endl;
-                cout << ErreurDroiteEpipolaire(sys3d) << "\n";
+                cout << EpipolarRightError(sys3d) << "\n";
                 cout << sys3d.m[0] << "\n" << sys3d.d[0] << "\n" << sys3d.m[1] << "\n" << sys3d.d[1] << "\n";
                 cout << sys3d.R << "\n" << sys3d.T << "\n" << sys3d.E << "\n" << sys3d.F << "\n";
                 if (!sys3d.R.empty())
                 {
                     stereoRectify(sys3d.m[0], sys3d.d[0], sys3d.m[1], sys3d.d[1],
-                        tailleWebcam[0], sys3d.R, sys3d.T, sys3d.R1, sys3d.R2, sys3d.P1, sys3d.P2, sys3d.Q,
+                        webcamSize[0], sys3d.R, sys3d.T, sys3d.R1, sys3d.R2, sys3d.P1, sys3d.P2, sys3d.Q,
                         CALIB_ZERO_DISPARITY, -1, Size(), &sys3d.valid1, &sys3d.valid2);
-                    SauverConfiguration("config.yml", mire, pc, sys3d,pStereo);
+                    SaveConfiguration("config.yml", target, pc, sys3d,pStereo);
                 }
                 break;
             }
@@ -644,12 +652,12 @@ int main (int argc,char **argv)
         if (modeAffichage)
         {
             if (!algoStereo)
-                x=LireImages(&pCamera, &v, x);
+                x=ReadImages(&pCamera, &v, x);
             else
-                x= LireImagesSynchro(&pCamera, &v);
+                x= ReadImagesSynchro(&pCamera, &v);
             if (x.size() == 2)
             {
-                if (modeAffichage&MODE_EPIPOLAIRE && equEpipolar.rows == segment.size())
+                if (modeAffichage&EPIPOLAR_MODE && equEpipolar.rows == segment.size())
                 {
                     for (int i = 0; i < equEpipolar.rows; i++)
                         {
@@ -677,22 +685,22 @@ int main (int argc,char **argv)
                 for (int i = 0; i < x.size(); i++)
                 {
                     if (!x[i].empty())
-                        imshow(format("Webcam %d", i), zoom(x[i], zoomAffichage,&sDistance));
+                        imshow(format("Webcam %d", i), zoom(x[i], zoomDisplay,&sDistance));
                 }
-                if (modeAffichage&MODE_EPIPOLAIRE)
+                if (modeAffichage&EPIPOLAR_MODE)
                 {
                     Rect dst(0, 0, 0, 0);
                     for (int i = 0; i < x.size(); i++)
                     {
                         if (i == 0)
-                            dst = Rect(Point(0, 0), tailleWebcam[i]);
+                            dst = Rect(Point(0, 0), webcamSize[i]);
                         else if (i % 2 == 1)
-                            dst.x += tailleWebcam[i].width;
+                            dst.x += webcamSize[i].width;
                         else
-                            dst.y += tailleWebcam[i].height;
+                            dst.y += webcamSize[i].height;
                         x[i].copyTo(frame(dst));
                     }
-                    imshow("Cameras", zoom(frame, zoomAffichage));
+                    imshow("Cameras", zoom(frame, zoomDisplay));
                     if (code == 'e')
                     {
                         imwrite("epipolar.png",frame);
@@ -704,16 +712,16 @@ int main (int argc,char **argv)
             {
                 Mat disp8, disp8cc, imgL, imgD;
                 if (algoStereo ==2)
-                    pStereo.sgbm->compute(x[0], x[1], sDistance.disparite);
+                    pStereo.sgbm->compute(x[0], x[1], sDistance.disparity);
                 else
                 {
                     cvtColor(x[0], imgL, COLOR_BGR2GRAY);
                     cvtColor(x[1], imgD, COLOR_BGR2GRAY);
-                    pStereo.bm->compute(imgL, imgD, sDistance.disparite);
+                    pStereo.bm->compute(imgL, imgD, sDistance.disparity);
                 }
-                sDistance.disparite.convertTo(disp8, CV_8U, 1 / 16.);
+                sDistance.disparity.convertTo(disp8, CV_8U, 1 / 16.);
                 applyColorMap(disp8, disp8cc, COLORMAP_JET);
-                imshow("disparite", zoom(disp8cc, zoomAffichage));
+                imshow("disparity", zoom(disp8cc, zoomDisplay));
             }
         }
     }
@@ -730,7 +738,7 @@ int main (int argc,char **argv)
     }
     std::this_thread::sleep_for (std::chrono::seconds(2));
     th.clear();
-    SauverConfiguration("config.yml", mire, pc, sys3d, pStereo);
+    SaveConfiguration("config.yml", target, pc, sys3d, pStereo);
     return 0;
 }
 
@@ -794,8 +802,8 @@ void videoacquire(ParamCamera *pc)
         nbAcq++;
         int64 dt = tpsFrame - tpsFrameAsk;
         mtxTimeStamp[pc->pc->index].lock();
-        if (modeAffichage&MODE_REGLAGECAMERA)
-            GestionCmdCamera(pc);
+        if (modeAffichage&CAMERASETUP_MODE )
+            ManagementCmdCamera(pc);
         if (stopThread)
             break;
         if (pc->captureImage)
@@ -808,20 +816,20 @@ void videoacquire(ParamCamera *pc)
                 pc->finAcq.push_back(tpsFrame);
             }
         }
-        if (pc->cmd & MODE_AFFICHAGE)
-            modeAffichage = modeAffichage | MODE_AFFICHAGE;
+        if (pc->cmd & DISPLAY_MODE)
+            modeAffichage = modeAffichage | DISPLAY_MODE;
         else
-            modeAffichage = modeAffichage & ~MODE_AFFICHAGE;
-        if (pc->cmd & MODE_REGLAGECAMERA)
-            modeAffichage = modeAffichage | MODE_REGLAGECAMERA;
+            modeAffichage = modeAffichage & ~DISPLAY_MODE;
+        if (pc->cmd & CAMERASETUP_MODE )
+            modeAffichage = modeAffichage | CAMERASETUP_MODE ;
         else
-            modeAffichage = modeAffichage & ~MODE_REGLAGECAMERA;
+            modeAffichage = modeAffichage & ~CAMERASETUP_MODE ;
         mtxTimeStamp[pc->pc->index].unlock();
 
-        if (modeAffichage & MODE_AFFICHAGE)
+        if (modeAffichage & DISPLAY_MODE)
         {
             mtxTimeStamp[pc->pc->index].lock();
-            frame.copyTo(pc->derniereImage);
+            frame.copyTo(pc->lastImage);
             mtxTimeStamp[pc->pc->index].unlock();
         }
 
@@ -830,7 +838,7 @@ void videoacquire(ParamCamera *pc)
     mtxTimeStamp[pc->pc->index].unlock();
 }
 
-vector<VideoCapture> RechercheCamera()
+vector<VideoCapture> SearchCamera()
 {
     vector<VideoCapture> v;
     FileStorage fs("config.xml", FileStorage::READ);
@@ -888,7 +896,7 @@ vector<VideoCapture> RechercheCamera()
     return v;
 }
 
-void GestionCmdCamera(ParamCamera *pc)
+void ManagementCmdCamera(ParamCamera *pc)
 {
     double x = pc->pc->index;
     switch (pc->cmd & 0xFF)
@@ -932,7 +940,7 @@ void GestionCmdCamera(ParamCamera *pc)
     pc->cmd = pc->cmd & 0xFFFFFF00;
 }
 
-vector<Mat> LireImagesSynchro(vector<ParamCamera> *pc, vector<VideoCapture> *v)
+vector<Mat> ReadImagesSynchro(vector<ParamCamera> *pc, vector<VideoCapture> *v)
 {
     vector<Mat> x;
     for (int i = 0; i<v->size(); i++)
@@ -940,7 +948,7 @@ vector<Mat> LireImagesSynchro(vector<ParamCamera> *pc, vector<VideoCapture> *v)
     int64 tps;
     for (int i = 0; i < v->size(); i++)
     {
-        tps = getTickCount() + (*pc)[i].tempsDelai * getTickFrequency() ;
+        tps = getTickCount() + (*pc)[i].timeDelay * getTickFrequency() ;
         (*pc)[i].captureImage = 1;
         (*pc)[i].tpsCapture = tps;
         mtxTimeStamp[i].unlock();
@@ -969,8 +977,8 @@ vector<Mat> LireImagesSynchro(vector<ParamCamera> *pc, vector<VideoCapture> *v)
     }
     if (x.size() == 1)
     {
-        (*pc)[0].tempsDelai += 0.01;
-        (*pc)[1].tempsDelai += 0.01;
+        (*pc)[0].timeDelay += 0.01;
+        (*pc)[1].timeDelay += 0.01;
 
     }
     if (x.size()!=v->size())
@@ -978,9 +986,9 @@ vector<Mat> LireImagesSynchro(vector<ParamCamera> *pc, vector<VideoCapture> *v)
     return x;
 }
 
-bool ChargerConfiguration(String nomFichierConfiguration, ParamMire &mire, vector<ParamCalibration> &pc, ParamCalibration3D &sys3d, ParamAlgoStereo &pStereo)
+bool LoadConfiguration(String fileNameConfiguration, ParamTarget &target, vector<ParamCalibration> &pc, ParamCalibration3D &sys3d, ParamAlgoStereo &pStereo)
 {
-    FileStorage fs(nomFichierConfiguration, FileStorage::READ);
+    FileStorage fs(fileNameConfiguration, FileStorage::READ);
     pc[0].index = 0;
     pc[1].index = 1;
     pc[0].indexUSB = 0;
@@ -988,27 +996,27 @@ bool ChargerConfiguration(String nomFichierConfiguration, ParamMire &mire, vecto
     if (fs.isOpened())
     {
         if (!fs["EchiquierNbL"].empty())
-            fs["EchiquierNbL"] >> mire.nbL;
+            fs["EchiquierNbL"] >> target.nbL;
         if (!fs["EchiquierNbC"].empty())
-            fs["EchiquierNbC"]>> mire.nbC;
+            fs["EchiquierNbC"]>> target.nbC;
         if (!fs["EchiquierDimCarre"].empty())
-            fs["EchiquierDimCarre"] >> mire.dimCarre;
+            fs["EchiquierDimCarre"] >> target.dimCarre;
         if (!fs["ArucoNbL"].empty())
-            fs["ArucoNbL"] >> mire.nbLAruco;
+            fs["ArucoNbL"] >> target.nbLAruco;
         if (!fs["ArucoNbC"].empty())
-            fs["ArucoNbC"] >> mire.nbCAruco;
+            fs["ArucoNbC"] >> target.nbCAruco;
         if (!fs["ArucoDim"].empty())
-            fs["ArucoDim"] >> mire.dimAruco;
+            fs["ArucoDim"] >> target.dimAruco;
         if (!fs["ArucoSep"].empty())
-            fs["ArucoSep"] >> mire.sepAruco;
+            fs["ArucoSep"] >> target.sepAruco;
         if (!fs["ArucoDict"].empty())
-            fs["ArucoDict"] >> mire.dict;
+            fs["ArucoDict"] >> target.dict;
         if (!fs["Cam0index"].empty())
             fs["Cam0index"] >> pc[0].indexUSB;
         if (!fs["Cam0Size"].empty())
-            fs["Cam0Size"] >> pc[0].tailleImage;
+            fs["Cam0Size"] >> pc[0].sizeImage;
         if (!fs["Cam1Size"].empty())
-            fs["Cam1Size"] >> pc[1].tailleImage;
+            fs["Cam1Size"] >> pc[1].sizeImage;
         if (!fs["Cam1index"].empty())
             fs["Cam1index"] >> pc[1].indexUSB;
         if (!fs["typeCalib1"].empty())
@@ -1027,22 +1035,22 @@ bool ChargerConfiguration(String nomFichierConfiguration, ParamMire &mire, vecto
             fs["cameraDistorsion1"] >> pc[1].distCoeffs;
         if (!fs["ficDonnee0"].empty())
         {
-            fs["ficDonnee0"] >> pc[0].ficDonnees;
-            if (pc[0].ficDonnees.length()>0)
-                ChargerDonneesCalibration(pc[0].ficDonnees, &pc[0], NULL);
+            fs["ficDonnee0"] >> pc[0].dataFile;
+            if (pc[0].dataFile.length()>0)
+                LoadCalibrationData(pc[0].dataFile, &pc[0], NULL);
 
         }
         if (!fs["ficDonnee1"].empty() )
         {
-            fs["ficDonnee1"] >> pc[1].ficDonnees;
-            if (pc[1].ficDonnees.length()>0)
-                ChargerDonneesCalibration(pc[1].ficDonnees, &pc[1], NULL);
+            fs["ficDonnee1"] >> pc[1].dataFile;
+            if (pc[1].dataFile.length()>0)
+                LoadCalibrationData(pc[1].dataFile, &pc[1], NULL);
         }
         if (!fs["ficDonnee3d"].empty())
         {
-            fs["ficDonnee3d"] >> sys3d.ficDonnees;
-            if (sys3d.ficDonnees.length()>0)
-                ChargerDonneesCalibration(sys3d.ficDonnees, NULL, &sys3d);
+            fs["ficDonnee3d"] >> sys3d.dataFile;
+            if (sys3d.dataFile.length()>0)
+                LoadCalibrationData(sys3d.dataFile, NULL, &sys3d);
         }
         if (!fs["R"].empty())
         {
@@ -1067,13 +1075,13 @@ bool ChargerConfiguration(String nomFichierConfiguration, ParamMire &mire, vecto
         if (!fs["typeAlgoSGBM"].empty())
         {
             fs["typeAlgoSGBM"]>> pStereo.typeAlgoSGBM;
-            fs["preFilterType"] >> pStereo.typePreFiltre;
+            fs["preFilterType"] >> pStereo.typePreFilter;
             fs["preFilterCap"] >> pStereo.preFilterCap;
-            fs["blockSize"] >> pStereo.tailleBloc;
-            fs["numDisparities"] >> pStereo.nbDisparite;
-            fs["uniquenessRatio"] >> pStereo.unicite;
-            fs["speckleRange"] >> pStereo.etenduSpeckle;
-            fs["speckleSize"] >> pStereo.tailleSpeckle;
+            fs["blockSize"] >> pStereo.blockSize;
+            fs["numDisparities"] >> pStereo.nbDisparity;
+            fs["uniquenessRatio"] >> pStereo.uniqueness;
+            fs["speckleRange"] >> pStereo.extendedSpeckle;
+            fs["speckleSize"] >> pStereo.sizeSpeckle;
         }
         return true;
     }
@@ -1081,9 +1089,9 @@ bool ChargerConfiguration(String nomFichierConfiguration, ParamMire &mire, vecto
 }
 
 
-void SauverConfiguration(String nomFichierConfiguration,ParamMire mire,vector<ParamCalibration> pc, ParamCalibration3D &sys3d, ParamAlgoStereo &pStereo)
+void SaveConfiguration(String fileNameConfiguration,ParamTarget target,vector<ParamCalibration> pc, ParamCalibration3D &sys3d, ParamAlgoStereo &pStereo)
 {
-    if (nomFichierConfiguration == "config.yml")
+    if (fileNameConfiguration == "config.yml")
     {
         time_t rawtime;
         struct tm * timeinfo;
@@ -1093,9 +1101,9 @@ void SauverConfiguration(String nomFichierConfiguration,ParamMire mire,vector<Pa
         timeinfo = localtime(&rawtime);
 
         strftime(buffer, 256, "config%Y%m%d%H%M%S.yml", timeinfo);
-        rename(nomFichierConfiguration.c_str(), buffer);
+        rename(fileNameConfiguration.c_str(), buffer);
     }
-    FileStorage fs(nomFichierConfiguration, FileStorage::WRITE);
+    FileStorage fs(fileNameConfiguration, FileStorage::WRITE);
 
     if (fs.isOpened())
     {
@@ -1106,27 +1114,27 @@ void SauverConfiguration(String nomFichierConfiguration,ParamMire mire,vector<Pa
         strftime(tmp, sizeof(tmp) - 1, "%c", t2);
 
         fs << "date" << tmp;
-        fs << "EchiquierNbL"<<mire.nbL;
-        fs << "EchiquierNbC"<<mire.nbC;
-        fs << "EchiquierDimCarre"<<mire.dimCarre;
-        fs << "ArucoNbL"<<mire.nbLAruco;
-        fs << "ArucoNbC" << mire.nbCAruco;
-        fs << "ArucoDim" << mire.dimAruco;
-        fs << "ArucoSep"<< mire.sepAruco;
-        fs << "ArucoDict" << mire.dict;
+        fs << "EchiquierNbL"<<target.nbL;
+        fs << "EchiquierNbC"<<target.nbC;
+        fs << "EchiquierDimCarre"<<target.dimCarre;
+        fs << "ArucoNbL"<<target.nbLAruco;
+        fs << "ArucoNbC" << target.nbCAruco;
+        fs << "ArucoDim" << target.dimAruco;
+        fs << "ArucoSep"<< target.sepAruco;
+        fs << "ArucoDict" << target.dict;
         fs << "typeCalib0" << pc[0].typeCalib2D;
         fs << "Cam0index" << pc[0].indexUSB;
-        fs << "Cam0Size" << pc[0].tailleImage;
+        fs << "Cam0Size" << pc[0].sizeImage;
         fs << "typeCalib1" << pc[1].typeCalib2D;
         fs << "Cam1index" << pc[1].indexUSB;
-        fs << "Cam1Size" << pc[1].tailleImage;
+        fs << "Cam1Size" << pc[1].sizeImage;
         fs << "cameraMatrice0" << pc[0].cameraMatrix;
         fs << "cameraDistorsion0" << pc[0].distCoeffs;
         fs << "cameraMatrice1" << pc[1].cameraMatrix;
         fs << "cameraDistorsion1" << pc[1].distCoeffs;
-        fs << "ficDonnee0" << pc[0].ficDonnees;
-        fs << "ficDonnee1" << pc[1].ficDonnees;
-        fs << "ficDonnee3d" << sys3d.ficDonnees;
+        fs << "ficDonnee0" << pc[0].dataFile;
+        fs << "ficDonnee1" << pc[1].dataFile;
+        fs << "ficDonnee3d" << sys3d.dataFile;
         fs << "typeCalib3d" << sys3d.typeCalib3D;
         fs << "R" << sys3d.R << "T" << sys3d.T << "R1" << sys3d.R1 << "R2" << sys3d.R2 << "P1" << sys3d.P1 << "P2" << sys3d.P2;
         fs << "Q" << sys3d.Q << "F" << sys3d.F << "E" << sys3d.E << "rect1" << sys3d.valid1 << "rect2" << sys3d.valid2;
@@ -1137,19 +1145,19 @@ void SauverConfiguration(String nomFichierConfiguration,ParamMire mire,vector<Pa
 
         }
         fs << "typeAlgoSGBM" << pStereo.typeAlgoSGBM;
-        fs << "preFilterType" << pStereo.typePreFiltre;
+        fs << "preFilterType" << pStereo.typePreFilter;
         fs << "preFilterCap" << pStereo.preFilterCap;
-        fs << "blockSize" << pStereo.tailleBloc;
-        fs << "numDisparities" << pStereo.nbDisparite;
-        fs << "uniquenessRatio" << pStereo.unicite;
-        fs << "speckleRange" << pStereo.etenduSpeckle;
-        fs << "speckleSize" << pStereo.tailleSpeckle;
+        fs << "blockSize" << pStereo.blockSize;
+        fs << "numDisparities" << pStereo.nbDisparity;
+        fs << "uniquenessRatio" << pStereo.uniqueness;
+        fs << "speckleRange" << pStereo.extendedSpeckle;
+        fs << "speckleSize" << pStereo.sizeSpeckle;
 
     }
 }
 
 
-vector<Mat> LireImages(vector<ParamCamera> *pc, vector<VideoCapture> *v,vector<Mat> &x)
+vector<Mat> ReadImages(vector<ParamCamera> *pc, vector<VideoCapture> *v,vector<Mat> &x)
 {
     vector<Mat> xx;
     if (x.size()!=v->size())
@@ -1159,7 +1167,7 @@ vector<Mat> LireImages(vector<ParamCamera> *pc, vector<VideoCapture> *v,vector<M
     for (int i = 0; i < v->size(); i++)
     {
         mtxTimeStamp[i].lock();
-        (*pc)[i].derniereImage.copyTo(xx[i]);
+        (*pc)[i].lastImage.copyTo(xx[i]);
         mtxTimeStamp[i].unlock();
     }
     return xx;
@@ -1167,7 +1175,7 @@ vector<Mat> LireImages(vector<ParamCamera> *pc, vector<VideoCapture> *v,vector<M
 
 #ifdef USE_VTK
 
-void VizMonde(Mat img, Mat xyz)
+void VizWorld(Mat img, Mat xyz)
 {
     vector<Point3d> points;
     vector<Vec3b> couleur;
@@ -1191,7 +1199,7 @@ void VizMonde(Mat img, Mat xyz)
 }
 
 
-void VizDisparite(Mat img, Mat disp)
+void Vizdisparity(Mat img, Mat disp)
 {
     vector<Point3d> points;
     vector<int> polygone;
@@ -1202,9 +1210,9 @@ void VizDisparite(Mat img, Mat disp)
         float *d = disp.ptr<float>(i) + 1;
         for (int j = 1; j < img.cols - 1; j++, d++)
         {
-            float disparite= *d;
-            if (disparite<0)
-                disparite =10000;
+            float disparity= *d;
+            if (disparity<0)
+                disparity =10000;
             Vec3d p1(j,i, *d);
             Vec3d p2(j-1,i , *d);
             Vec3d p3(j,i-1, *d);
@@ -1235,7 +1243,7 @@ void VizDisparite(Mat img, Mat disp)
             nbPoint += 4;
         }
     }
-    viz::Viz3d fen3D("Disparite 3D");
+    viz::Viz3d fen3D("disparity 3D");
     viz::WMesh reseauFacette(points, polygone, couleur);
     fen3D.showWidget("I3d", reseauFacette);
     fen3D.spin();
@@ -1244,25 +1252,25 @@ void VizDisparite(Mat img, Mat disp)
 
 void MesureDistance(int event, int x, int y, int flags, void * userData)
 {
-    SuiviDistance *sDistance=(SuiviDistance*)userData;
-    if (sDistance->disparite.empty())
+    TrackingDistance *sDistance=(TrackingDistance*)userData;
+    if (sDistance->disparity.empty())
         return;
     if (event == EVENT_FLAG_LBUTTON)
     {
-        Point pImg(x / sDistance->zoomAffichage, y / sDistance->zoomAffichage);
-        if (sDistance->disparite.at<short>(pImg) <=-1)
+        Point pImg(x / sDistance->zoomDisplay, y / sDistance->zoomDisplay);
+        if (sDistance->disparity.at<short>(pImg) <=-1)
             return;
-        Point3d p(x / sDistance->zoomAffichage, y/ sDistance->zoomAffichage, sDistance->disparite.at<short>(pImg));
+        Point3d p(x / sDistance->zoomDisplay, y/ sDistance->zoomDisplay, sDistance->disparity.at<short>(pImg));
         p.z = p.z/16;
         sDistance->p.push_back(p);
-        Mat ptDisparite(sDistance->p), ptXYZ;
+        Mat ptdisparity(sDistance->p), ptXYZ;
         sDistance->m.release();
-        perspectiveTransform(ptDisparite, sDistance->m, sDistance->pStereo->Q);
+        perspectiveTransform(ptdisparity, sDistance->m, sDistance->pStereo->Q);
         cout << "\n ++++++++++\n";
-        cout << ptDisparite;
+        cout << ptdisparity;
         cout << "\n ";
         for (int i=0;i<sDistance->m.rows;i++)
-            cout << ptDisparite.at<Vec3d>(i)<<" = "<<sDistance->m.at<Vec3d>(i)<<" --> "<<norm(sDistance->m.at<Vec3d>(i))<<"\n";
+            cout << ptdisparity.at<Vec3d>(i)<<" = "<<sDistance->m.at<Vec3d>(i)<<" --> "<<norm(sDistance->m.at<Vec3d>(i))<<"\n";
     }
     if (event == EVENT_FLAG_RBUTTON)
     {
@@ -1270,9 +1278,9 @@ void MesureDistance(int event, int x, int y, int flags, void * userData)
     }
 }
 
-Mat zoom(Mat x, float w,SuiviDistance *s)
+Mat zoom(Mat x, float w,TrackingDistance *s)
 {
-    if (s && !s->disparite.empty() && s->p.size() > 0)
+    if (s && !s->disparity.empty() && s->p.size() > 0)
     {
 
     }
@@ -1285,42 +1293,42 @@ Mat zoom(Mat x, float w,SuiviDistance *s)
     return x;
  }
 
-void AjouteGlissiere(String nomGlissiere, String nomFenetre, int minGlissiere, int maxGlissiere, int valeurDefaut, int *valGlissiere, void(*f)(int, void *), void *r)
+void AddSlide(String nameSlide, String nameWindow, int minSlide, int maxSlide, int defaultValue, int *valSlide, void(*f)(int, void *), void *r)
 {
-    createTrackbar(nomGlissiere, nomFenetre, valGlissiere, 1, f, r);
-    setTrackbarMin(nomGlissiere, nomFenetre, minGlissiere);
-    setTrackbarMax(nomGlissiere, nomFenetre, maxGlissiere);
-    setTrackbarPos(nomGlissiere, nomFenetre, valeurDefaut);
+    createTrackbar(nameSlide, nameWindow, valSlide, 1, f, r);
+    setTrackbarMin(nameSlide, nameWindow, minSlide);
+    setTrackbarMax(nameSlide, nameWindow, maxSlide);
+    setTrackbarPos(nameSlide, nameWindow, defaultValue);
 }
 
-void MAJParamStereo(int x, void * r)
+void UpdateParamStereo(int x, void * r)
 {
     ParamAlgoStereo *pStereo= (ParamAlgoStereo *)r;
 
-    pStereo->bm->setBlockSize(2*pStereo->tailleBloc+1);
-    pStereo->sgbm->setBlockSize(2 * pStereo->tailleBloc + 1);
-    pStereo->bm->setNumDisparities(16*pStereo->nbDisparite);
-    pStereo->sgbm->setNumDisparities(16*pStereo->nbDisparite);
-    pStereo->bm->setUniquenessRatio(pStereo->unicite);
-    pStereo->sgbm->setUniquenessRatio(pStereo->unicite);
-    pStereo->bm->setSpeckleWindowSize(pStereo->tailleSpeckle);
-    pStereo->sgbm->setSpeckleWindowSize(pStereo->tailleSpeckle);
-    pStereo->bm->setSpeckleRange(pStereo->etenduSpeckle);
-    pStereo->sgbm->setSpeckleRange(pStereo->etenduSpeckle);
+    pStereo->bm->setBlockSize(2*pStereo->blockSize+1);
+    pStereo->sgbm->setBlockSize(2 * pStereo->blockSize + 1);
+    pStereo->bm->setNumDisparities(16*pStereo->nbDisparity);
+    pStereo->sgbm->setNumDisparities(16*pStereo->nbDisparity);
+    pStereo->bm->setUniquenessRatio(pStereo->uniqueness);
+    pStereo->sgbm->setUniquenessRatio(pStereo->uniqueness);
+    pStereo->bm->setSpeckleWindowSize(pStereo->sizeSpeckle);
+    pStereo->sgbm->setSpeckleWindowSize(pStereo->sizeSpeckle);
+    pStereo->bm->setSpeckleRange(pStereo->extendedSpeckle);
+    pStereo->sgbm->setSpeckleRange(pStereo->extendedSpeckle);
 }
 
 
-double ErreurDroiteEpipolaire(ParamCalibration3D sys3d)
+double EpipolarRightError(ParamCalibration3D sys3d)
 {
     double err = 0;
     int nbPoints = 0;
     vector<Vec3f> lines[2];
-    for (int i = 0; i < sys3d.pointsCameraGauche.size(); i++)
+    for (int i = 0; i < sys3d.pointsCameraLeft.size(); i++)
     {
-        int nbPt = (int)sys3d.pointsCameraGauche[i].size();
+        int nbPt = (int)sys3d.pointsCameraLeft[i].size();
         Mat ptImg[2];
-        undistortPoints(sys3d.pointsCameraGauche[i], ptImg[0], sys3d.m[0], sys3d.d[0], Mat(), sys3d.m[0]);
-        undistortPoints(sys3d.pointsCameraDroite[i], ptImg[1], sys3d.m[1], sys3d.d[1], Mat(), sys3d.m[1]);
+        undistortPoints(sys3d.pointsCameraLeft[i], ptImg[0], sys3d.m[0], sys3d.d[0], Mat(), sys3d.m[0]);
+        undistortPoints(sys3d.pointsCameraRight[i], ptImg[1], sys3d.m[1], sys3d.d[1], Mat(), sys3d.m[1]);
         computeCorrespondEpilines(ptImg[0], 1, sys3d.F, lines[0]);
         computeCorrespondEpilines(ptImg[1], 2, sys3d.F, lines[1]);
         for (int j = 0; j < nbPt; j++)
@@ -1336,19 +1344,19 @@ double ErreurDroiteEpipolaire(ParamCalibration3D sys3d)
     return err/ nbPoints/2;
 }
 
-bool AnalyseCharuco(Mat x, ParamCalibration &pc,Mat frame,ParamMire &mire)
+bool AnalysisCharuco(Mat x, ParamCalibration &pc,Mat frame,ParamTarget &target)
 {
     
     vector< int > ids;
     vector< vector< Point2f > > refAruco, refus;
     vector<Point2f> echiquier;
-    aruco::detectMarkers(x, mire.dictionary, refAruco, ids, mire.detectorParams);
+    aruco::detectMarkers(x, target.dictionary, refAruco, ids, target.detectorParams);
  
-    aruco::refineDetectedMarkers(x, mire.board, refAruco, ids, refus);
+    aruco::refineDetectedMarkers(x, target.board, refAruco, ids, refus);
     if (ids.size() > 0)
     {
         Mat currentCharucoCorners, currentCharucoIds;
-        aruco::interpolateCornersCharuco(refAruco, ids, x, mire.gridboard, currentCharucoCorners,
+        aruco::interpolateCornersCharuco(refAruco, ids, x, target.gridboard, currentCharucoCorners,
             currentCharucoIds);
         aruco::drawDetectedCornersCharuco(frame, currentCharucoCorners, currentCharucoIds);
         vector<Point3f> pReel;
@@ -1356,14 +1364,14 @@ bool AnalyseCharuco(Mat x, ParamCalibration &pc,Mat frame,ParamMire &mire)
             for (int jr = 0; jr<refAruco[ir].size(); jr++)
             {
                 echiquier.push_back(refAruco[ir][jr]);
-                pReel.push_back(mire.board.get()->objPoints[ids[ir]][jr]);
+                pReel.push_back(target.board.get()->objPoints[ids[ir]][jr]);
             }
 
         for (int ir = 0; ir < currentCharucoIds.rows; ir++)
         {
             int index= currentCharucoIds.at<int>(ir, 0);
             echiquier.push_back(currentCharucoCorners.at<Point2f>(ir,0));
-            pReel.push_back(mire.gridboard->chessboardCorners[index]);
+            pReel.push_back(target.gridboard->chessboardCorners[index]);
 
         }
         pc.pointsObjets.push_back(pReel);
@@ -1374,30 +1382,30 @@ bool AnalyseCharuco(Mat x, ParamCalibration &pc,Mat frame,ParamMire &mire)
     return true;
 }
 
-bool AnalyseGrille(Mat x, ParamCalibration *pc, ParamCalibration3D *sys3d,int index, Mat frame, ParamMire &mire)
+bool AnalysisGrid(Mat x, ParamCalibration *pc, ParamCalibration3D *sys3d,int index, Mat frame, ParamTarget &target)
 {
     vector<Point2f> echiquier;
-    bool grille = findChessboardCorners(x, Size(mire.nbC, mire.nbL), echiquier, CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FAST_CHECK | CALIB_CB_NORMALIZE_IMAGE);
+    bool grille = findChessboardCorners(x, Size(target.nbC, target.nbL), echiquier, CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FAST_CHECK | CALIB_CB_NORMALIZE_IMAGE);
     if (grille)
     {
         Mat imGris;
         cvtColor(x, imGris, COLOR_BGR2GRAY);
         cornerSubPix(imGris, echiquier, Size(5, 5), Size(-1, -1), TermCriteria(TermCriteria::EPS + TermCriteria::COUNT, 100, 0.01));
-        drawChessboardCorners(frame, Size(mire.nbC, mire.nbL), Mat(echiquier), false);
+        drawChessboardCorners(frame, Size(target.nbC, target.nbL), Mat(echiquier), false);
         if (sys3d==NULL && pc)
         {
             pc->pointsCamera.push_back(echiquier);
-            pc->pointsObjets.push_back(pc->pointsGrille);
+            pc->pointsObjets.push_back(pc->gridPoints);
         }
         if (sys3d)
         {
             if (index==0)
             {
-                sys3d->pointsCameraGauche.push_back(echiquier);
-                sys3d->pointsObjets.push_back(pc->pointsGrille);
+                sys3d->pointsCameraLeft.push_back(echiquier);
+                sys3d->pointsObjets.push_back(pc->gridPoints);
             }
             else
-                sys3d->pointsCameraDroite.push_back(echiquier);
+                sys3d->pointsCameraRight.push_back(echiquier);
         }
 
     }
@@ -1406,7 +1414,7 @@ bool AnalyseGrille(Mat x, ParamCalibration *pc, ParamCalibration3D *sys3d,int in
     return true;
 }
 
-void ChargerDonneesCalibration(String nomFichier, ParamCalibration *pc, ParamCalibration3D *sys3d)
+void LoadCalibrationData(String nomFichier, ParamCalibration *pc, ParamCalibration3D *sys3d)
 {
     FileStorage fs(nomFichier, FileStorage::READ);
     if (!fs.isOpened())
@@ -1416,7 +1424,7 @@ void ChargerDonneesCalibration(String nomFichier, ParamCalibration *pc, ParamCal
     if (pc)
     {
         if (!fs["nbGrille"].empty())
-            fs["nbGrille"] >> pc->nbImageGrille;
+            fs["nbGrille"] >> pc->nbGridImage;
         if (!fs["Grille"].empty())
             fs["Grille"] >> pc->pointsCamera;
         if (!fs["Objet"].empty())
@@ -1425,9 +1433,9 @@ void ChargerDonneesCalibration(String nomFichier, ParamCalibration *pc, ParamCal
     else if( sys3d)
     {
         if (!fs["GrilleG"].empty())
-            fs["GrilleG"] >> sys3d->pointsCameraGauche;
+            fs["GrilleG"] >> sys3d->pointsCameraLeft;
         if (!fs["GrilleD"].empty())
-            fs["GrilleD"] >> sys3d->pointsCameraDroite;
+            fs["GrilleD"] >> sys3d->pointsCameraRight;
         if (!fs["Objet"].empty())
             fs["Objet"] >> sys3d->pointsObjets;
 
@@ -1436,7 +1444,7 @@ void ChargerDonneesCalibration(String nomFichier, ParamCalibration *pc, ParamCal
 }
 
 
-void SauverDonneesCalibration(ParamCalibration *pc1, ParamCalibration *pc2,ParamCalibration3D *sys3d)
+void SaveCalibrationData(ParamCalibration *pc1, ParamCalibration *pc2,ParamCalibration3D *sys3d)
 {
     if (!sys3d)
     {
@@ -1449,8 +1457,8 @@ void SauverDonneesCalibration(ParamCalibration *pc1, ParamCalibration *pc2,Param
         int nbPts=0;
         for (int i=0;i<pc->pointsCamera.size();i++)
             nbPts+= pc->pointsCamera[i].size();
-        pc->ficDonnees= format("Echiquier%d_%d.yml", pc->indexUSB, getTickCount());
-        FileStorage fEchiquier(pc->ficDonnees, FileStorage::WRITE);
+        pc->dataFile= format("Echiquier%d_%d.yml", pc->indexUSB, getTickCount());
+        FileStorage fEchiquier(pc->dataFile, FileStorage::WRITE);
         fEchiquier << "nbGrille" << (int)pc->pointsCamera.size();
         fEchiquier << "nbPoints" << (int)nbPts;
         fEchiquier << "Grille" << pc->pointsCamera;
@@ -1460,15 +1468,15 @@ void SauverDonneesCalibration(ParamCalibration *pc1, ParamCalibration *pc2,Param
     }
     else
     {
-        sys3d->ficDonnees = format("EchiquierStereo_%d.yml", getTickCount());
-        FileStorage fEchiquier(sys3d->ficDonnees, FileStorage::WRITE);
+        sys3d->dataFile = format("EchiquierStereo_%d.yml", getTickCount());
+        FileStorage fEchiquier(sys3d->dataFile, FileStorage::WRITE);
         int nbPts = 0;
         for (int i = 0; i<pc1->pointsCamera.size(); i++)
             nbPts += pc1->pointsCamera[i].size();
         fEchiquier << "nbGrille" << (int)pc1->pointsCamera.size();
         fEchiquier << "nbPoints" << (int)nbPts;
-        fEchiquier << "GrilleG" << sys3d->pointsCameraGauche;
-        fEchiquier << "GrilleD" << sys3d->pointsCameraDroite;
+        fEchiquier << "GrilleG" << sys3d->pointsCameraLeft;
+        fEchiquier << "GrilleD" << sys3d->pointsCameraRight;
         fEchiquier << "Objet" << sys3d->pointsObjets;
         fEchiquier.release();
     }

@@ -17,6 +17,5 @@ ${HEADERS_BASE}
 ${SOURCES_BASE} 
 ${SOURCES} )
 target_link_libraries( ${PROJECT_NAME} 
-                       ${OpenCV_LIBS}
-					   )	
+                       ${OpenCV_LIBS} )	
                            
