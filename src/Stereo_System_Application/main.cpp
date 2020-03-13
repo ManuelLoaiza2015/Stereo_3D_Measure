@@ -152,7 +152,7 @@ int main (int argc,char **argv)
     target.detectorParams = aruco::DetectorParameters::create();
     target.detectorParams->cornerRefinementMethod = aruco::CORNER_REFINE_SUBPIX;
     target.detectorParams->cornerRefinementMinAccuracy = 0.01;
-    float zoomDisplay=1;
+    float zoomDisplay = 1;
 
     vector<thread> th;
     vector<double> tpsAverageTime;
@@ -182,12 +182,14 @@ int main (int argc,char **argv)
             vid.set(CAP_PROP_FRAME_HEIGHT, pc[i].sizeImage.height);
             webcamSize[i]=Size(v[i].get(CAP_PROP_FRAME_WIDTH), v[i].get(CAP_PROP_FRAME_HEIGHT));
             pc[i].sizeImage = webcamSize[i];
+
             if (i==0)
                 globalSize= webcamSize[i];
             else if (i%2==1)
                 globalSize.width += webcamSize[i].width;
             else
                 globalSize.height += webcamSize[i].height;
+            
             pCamera[i].v = &v[i];
             pCamera[i].pc = &pc[i];
             pCamera[i].cmd = 0;
@@ -198,15 +200,20 @@ int main (int argc,char **argv)
             t.detach();
         }
         else
-            th.push_back(thread() );
+            th.push_back( thread() );
     }
 
     if (nbCamera != 2)
     {
-        cout<< nbCamera << " Found. ";
-        cout<<"Only 2 cameras are needed!\n";
+        cout<< "\nNumber cameras: " << nbCamera << "\nError: Not found stereo cameras configuration ..";
+        cout<<"\nOnly 2 cameras are needed!\n";
         return 0;
     }
+    else
+    {
+        cout<< "\nNumber cameras: "<< nbCamera << "\nStereo cameras configuration found succesfully !!!";
+    }
+
     
     if (!configActive)
         SaveConfiguration("config.yml", target, pc, sys3d,pStereo);
@@ -218,8 +225,8 @@ int main (int argc,char **argv)
     Point center(20,20);
     vector<int64> tCapture;
     vector<Mat> x;
-    int modeAffichage=0;
-    int algoStereo=0;
+    int displayMode = 0;
+    int algoStereo = 0;
 
     Mat map11, map12, map21, map22;
 
@@ -227,10 +234,13 @@ int main (int argc,char **argv)
         initUndistortRectifyMap(sys3d.m[0], sys3d.d[0], sys3d.R1, sys3d.P1, webcamSize[0], CV_16SC2, map11, map12);
     if (!sys3d.R2.empty())
         initUndistortRectifyMap(sys3d.m[1], sys3d.d[1], sys3d.R2, sys3d.P2, webcamSize[1], CV_16SC2, map21, map22);
+    
     sDistance.pStereo =&sys3d;
     sDistance.zoomDisplay = zoomDisplay;
+    
     imshow("Cameras",zoom(frame, zoomDisplay));
     namedWindow("Control",WINDOW_NORMAL);
+    
     if (!map11.empty() && !map21.empty())
     {
         pStereo.bm = StereoBM::create(16*pStereo.nbDisparity, 2 * pStereo.blockSize + 1);
@@ -242,7 +252,8 @@ int main (int argc,char **argv)
         pStereo.sgbm->setSpeckleWindowSize(pStereo.sizeSpeckle);
         pStereo.bm->setSpeckleRange(pStereo.extendedSpeckle);
         pStereo.sgbm->setSpeckleRange(pStereo.extendedSpeckle);
-        AddSlide("Bloc", "Control", 2, 100, pStereo.blockSize, &pStereo.blockSize, UpdateParamStereo, &pStereo);
+        
+        AddSlide("blockSize", "Control", 2, 100, pStereo.blockSize, &pStereo.blockSize, UpdateParamStereo, &pStereo);
         AddSlide("nbDisparity", "Control", 1, 100, pStereo.nbDisparity, &pStereo.nbDisparity, UpdateParamStereo, &pStereo);
         AddSlide("uniqueness", "Control", 3, 100, pStereo.uniqueness, &pStereo.uniqueness, UpdateParamStereo, &pStereo);
         AddSlide("extendedSpeckle", "Control", 1, 10, pStereo.extendedSpeckle, &pStereo.extendedSpeckle, UpdateParamStereo, &pStereo);
@@ -269,17 +280,19 @@ int main (int argc,char **argv)
     vector<Point2f> segment;
     for (int i = 0; i < 10;i++)
         segment.push_back(Point2f(webcamSize[0].width/2, webcamSize[0].height*i / 10.0));
+    
     Mat equEpipolar;
     namedWindow("Webcam 0");
     namedWindow("disparity");
     setMouseCallback("Webcam 0", MesureDistance, &sDistance);
     setMouseCallback("disparity", MesureDistance, &sDistance);
 
-    int cameraSelect=0;
+    int cameraSelect = 0;
+
     do 
     {
         code = waitKey(1);
-        if (modeAffichage&CAMERASETUP_MODE )
+        if (displayMode&CAMERASETUP_MODE )
         {
             switch (code) {
             case '0':
@@ -314,7 +327,7 @@ int main (int argc,char **argv)
                 mtxTimeStamp[cameraSelect].unlock();
                 break;
             case 'R':
-                modeAffichage = modeAffichage& (~CAMERASETUP_MODE );
+                displayMode = displayMode& (~CAMERASETUP_MODE );
                 mtxTimeStamp[cameraSelect].lock();
                 pCamera[cameraSelect].cmd = pCamera[cameraSelect].cmd & (~CAMERASETUP_MODE );
                 mtxTimeStamp[cameraSelect].unlock();
@@ -323,9 +336,10 @@ int main (int argc,char **argv)
         }
         else
         {
-            switch (code) {
+            switch (code) 
+            {
             case 'R':
-                modeAffichage = modeAffichage| (CAMERASETUP_MODE );                    
+                displayMode = displayMode| (CAMERASETUP_MODE );                    
                 mtxTimeStamp[cameraSelect].lock();
                 pCamera[cameraSelect].cmd = pCamera[cameraSelect].cmd | CAMERASETUP_MODE ;
                 mtxTimeStamp[cameraSelect].unlock();
@@ -338,7 +352,7 @@ int main (int argc,char **argv)
                         pCamera[i].cmd = pCamera[i].cmd & ~DISPLAY_MODE;
                     else
                         pCamera[i].cmd = pCamera[i].cmd | DISPLAY_MODE;
-                    modeAffichage = pCamera[i].cmd;
+                    displayMode = pCamera[i].cmd;
                     mtxTimeStamp[i].unlock();
                 }
                 break;
@@ -454,10 +468,10 @@ int main (int argc,char **argv)
                     }
                 break;
             case 'l':
-                if (modeAffichage&EPIPOLAR_MODE)
-                    modeAffichage = modeAffichage & (~EPIPOLAR_MODE);
+                if (displayMode&EPIPOLAR_MODE)
+                    displayMode = displayMode & (~EPIPOLAR_MODE);
                 else
-                    modeAffichage = modeAffichage | (EPIPOLAR_MODE);
+                    displayMode = displayMode | (EPIPOLAR_MODE);
 
                 if (!sys3d.F.empty())
                 {
@@ -649,7 +663,7 @@ int main (int argc,char **argv)
             }
 
         }
-        if (modeAffichage)
+        if (displayMode)
         {
             if (!algoStereo)
                 x=ReadImages(&pCamera, &v, x);
@@ -657,7 +671,7 @@ int main (int argc,char **argv)
                 x= ReadImagesSynchro(&pCamera, &v);
             if (x.size() == 2)
             {
-                if (modeAffichage&EPIPOLAR_MODE && equEpipolar.rows == segment.size())
+                if (displayMode&EPIPOLAR_MODE && equEpipolar.rows == segment.size())
                 {
                     for (int i = 0; i < equEpipolar.rows; i++)
                         {
@@ -687,7 +701,7 @@ int main (int argc,char **argv)
                     if (!x[i].empty())
                         imshow(format("Webcam %d", i), zoom(x[i], zoomDisplay,&sDistance));
                 }
-                if (modeAffichage&EPIPOLAR_MODE)
+                if (displayMode&EPIPOLAR_MODE)
                 {
                     Rect dst(0, 0, 0, 0);
                     for (int i = 0; i < x.size(); i++)
@@ -772,7 +786,7 @@ void videoacquire(ParamCamera *pc)
 
     int64 tpsInit = getTickCount();
     int64 tckPerSec = static_cast<int64> (getTickFrequency());
-    int modeAffichage = 0;
+    int displayMode = 0;
     int64  tpsFrame = 0, tpsFramePre;
     int64 tpsFrameAsk;//, periodeTick = static_cast<int64> (getTickFrequency() / pc->fps);
     Mat frame,cFrame;
@@ -784,12 +798,16 @@ void videoacquire(ParamCamera *pc)
     frame.copyTo(frame2);
     tpsFrame = getTickCount();
     int64 offsetTime = pc->tpsGlobal + 2 * getTickFrequency();
+
     do
     {
         tpsFrame = getTickCount();
     } while (tpsFrame<offsetTime);
+    
     tpsFrameAsk = offsetTime;
+    
     int i = 0, index = pc->pc->index;
+
     for (int nbAcq = 0;;)
     {
         tpsFramePre = getTickCount();
@@ -802,7 +820,7 @@ void videoacquire(ParamCamera *pc)
         nbAcq++;
         int64 dt = tpsFrame - tpsFrameAsk;
         mtxTimeStamp[pc->pc->index].lock();
-        if (modeAffichage&CAMERASETUP_MODE )
+        if (displayMode&CAMERASETUP_MODE )
             ManagementCmdCamera(pc);
         if (stopThread)
             break;
@@ -817,16 +835,16 @@ void videoacquire(ParamCamera *pc)
             }
         }
         if (pc->cmd & DISPLAY_MODE)
-            modeAffichage = modeAffichage | DISPLAY_MODE;
+            displayMode = displayMode | DISPLAY_MODE;
         else
-            modeAffichage = modeAffichage & ~DISPLAY_MODE;
+            displayMode = displayMode & ~DISPLAY_MODE;
         if (pc->cmd & CAMERASETUP_MODE )
-            modeAffichage = modeAffichage | CAMERASETUP_MODE ;
+            displayMode = displayMode | CAMERASETUP_MODE ;
         else
-            modeAffichage = modeAffichage & ~CAMERASETUP_MODE ;
+            displayMode = displayMode & ~CAMERASETUP_MODE ;
         mtxTimeStamp[pc->pc->index].unlock();
 
-        if (modeAffichage & DISPLAY_MODE)
+        if (displayMode & DISPLAY_MODE)
         {
             mtxTimeStamp[pc->pc->index].lock();
             frame.copyTo(pc->lastImage);
@@ -989,10 +1007,12 @@ vector<Mat> ReadImagesSynchro(vector<ParamCamera> *pc, vector<VideoCapture> *v)
 bool LoadConfiguration(String fileNameConfiguration, ParamTarget &target, vector<ParamCalibration> &pc, ParamCalibration3D &sys3d, ParamAlgoStereo &pStereo)
 {
     FileStorage fs(fileNameConfiguration, FileStorage::READ);
+
     pc[0].index = 0;
     pc[1].index = 1;
     pc[0].indexUSB = 0;
     pc[1].indexUSB = 1;
+    
     if (fs.isOpened())
     {
         if (!fs["EchiquierNbL"].empty())
@@ -1087,7 +1107,6 @@ bool LoadConfiguration(String fileNameConfiguration, ParamTarget &target, vector
     }
     return false;
 }
-
 
 void SaveConfiguration(String fileNameConfiguration,ParamTarget target,vector<ParamCalibration> pc, ParamCalibration3D &sys3d, ParamAlgoStereo &pStereo)
 {
@@ -1316,7 +1335,6 @@ void UpdateParamStereo(int x, void * r)
     pStereo->bm->setSpeckleRange(pStereo->extendedSpeckle);
     pStereo->sgbm->setSpeckleRange(pStereo->extendedSpeckle);
 }
-
 
 double EpipolarRightError(ParamCalibration3D sys3d)
 {
