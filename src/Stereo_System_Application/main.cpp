@@ -292,9 +292,12 @@ int main (int argc,char **argv)
     do 
     {
         code = waitKey(1);
-        if (displayMode&CAMERASETUP_MODE )
+
+        if ( displayMode & CAMERASETUP_MODE )
         {
-            switch (code) {
+
+            switch (code) 
+            {
             case '0':
                 mtxTimeStamp[0].lock();
                 pCamera[0].cmd = pCamera[0].cmd | (CAMERASETUP_MODE );
@@ -663,7 +666,8 @@ int main (int argc,char **argv)
             }
 
         }
-        if (displayMode)
+
+        if ( displayMode )
         {
             if (!algoStereo)
                 x=ReadImages(&pCamera, &v, x);
@@ -671,7 +675,7 @@ int main (int argc,char **argv)
                 x= ReadImagesSynchro(&pCamera, &v);
             if (x.size() == 2)
             {
-                if (displayMode&EPIPOLAR_MODE && equEpipolar.rows == segment.size())
+                if (displayMode & EPIPOLAR_MODE && equEpipolar.rows == segment.size())
                 {
                     for (int i = 0; i < equEpipolar.rows; i++)
                         {
@@ -701,7 +705,7 @@ int main (int argc,char **argv)
                     if (!x[i].empty())
                         imshow(format("Webcam %d", i), zoom(x[i], zoomDisplay,&sDistance));
                 }
-                if (displayMode&EPIPOLAR_MODE)
+                if (displayMode & EPIPOLAR_MODE)
                 {
                     Rect dst(0, 0, 0, 0);
                     for (int i = 0; i < x.size(); i++)
@@ -714,6 +718,7 @@ int main (int argc,char **argv)
                             dst.y += webcamSize[i].height;
                         x[i].copyTo(frame(dst));
                     }
+                    
                     imshow("Cameras", zoom(frame, zoomDisplay));
                     if (code == 'e')
                     {
