@@ -110,7 +110,7 @@ vector<vector<int64>> tps(mtxTimeStamp.size());
 
 int stopThread=0;
 
-static void videoacquire(ParamCamera *pc);
+static void AcquireVideo(ParamCamera *pc);
 static vector<Mat> ReadImages(vector<ParamCamera> *pc, vector<VideoCapture> *v,vector<Mat> &x);
 static vector<Mat> ReadImagesSynchro(vector<ParamCamera> *pc, vector<VideoCapture> *v);
 static vector<VideoCapture> SearchCamera();
@@ -196,7 +196,7 @@ int main (int argc,char **argv)
             pCamera[i].tpsGlobal= tpsGlobal;
             pCamera[i].timeDelay = 0.1;
             
-            thread t(videoacquire, &pCamera[i]);
+            thread t(AcquireVideo, &pCamera[i]);
             t.detach();
         }
         else
@@ -757,7 +757,7 @@ int main (int argc,char **argv)
 }
 
 
-void videoacquire(ParamCamera *pc)
+void AcquireVideo(ParamCamera *pc)
 {
     double aaButter[11], bbButter[11];
     aaButter[0] = -0.9996859;
